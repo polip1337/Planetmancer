@@ -1,26 +1,22 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Draggable Spherical Grid</title>
-  <style>
+    <title>Spherical Grid Solution</title>
+    <style>
         body { margin: 0; overflow: hidden; }
-        #popup {
-            position: absolute;
-            background: white;
-            padding: 10px;
-            border: 1px solid black;
-            display: none;
-        }
-        #textureToggle {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 100;
-        }
+        #controls { position: absolute; top: 10px; left: 10px; z-index: 100; color: white; }
+        #popup { position: absolute; background: white; padding: 8px; border: 1px solid #ccc; display: none; }
     </style>
 </head>
 <body>
-<button id="textureToggle">Toggle Texture</button>
+<div id="controls">
+    <select id="subdivisions">
+        <option value="0">20 Faces</option>
+        <option value="1">80 Faces</option>
+        <option value="2">320 Faces</option>
+        <option value="3">1280 Faces</option>
+    </select>
+</div>
 <div id="popup"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -28,9 +24,14 @@
         let raycaster = new THREE.Raycaster();
         let mouse = new THREE.Vector2();
         let isDragging = false;
-        let previousMousePosition = { x: 0, y: 0 };
-        let currentIntersect = null;
-        let useTexture = false;
+        let previousPosition = { x: 0, y: 0 };
+        let currentFaceIndex = null;
+
+        // Check WebGL support first
+        if (!window.WebGLRenderingContext) {
+            alert('WebGL is not supported in your browser!');
+            throw new Error('WebGL not supported');
+        }
 
         init();
         animate();
@@ -38,106 +39,129 @@
         function init() {
             // Scene setup
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
-            // Create sphere with explicit geometry groups
-            const geometry = new THREE.IcosahedronGeometry(5, 3);
-
-            // Create material groups
-            geometry.clearGroups();
-            const materials = [];
-            for (let i = 0; i < geometry.faces.length; i++) {
-                geometry.addGroup(i * 3, 3, i);
-                materials.push(new THREE.MeshBasicMaterial({
-                    color: new THREE.Color().setHSL(Math.random(), 0.5, 0.5),
-                    transparent: true,
-                    opacity: 0.8,
-                    wireframe: false
-                }));
+            try {
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+            } catch (e) {
+                alert('Failed to create WebGL context: ' + e.message);
+                return;
             }
 
-            sphere = new THREE.Mesh(geometry, materials);
-            scene.add(sphere);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x333333);
+            document.body.appendChild(renderer.domElement);
 
-            // Add ambient light
-            const light = new THREE.AmbientLight(0xffffff, 1);
-            scene.add(light);
-
-            // Position camera
+            // Create initial sphere
+            createSphere(1);
             camera.position.z = 15;
+
+            // Lighting
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(1, 1, 1).normalize();
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040));
 
             // Event listeners
             document.addEventListener('mousedown', onMouseDown);
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
-            document.addEventListener('click', onDocumentClick);
-            window.addEventListener('resize', onWindowResize);
-            document.getElementById('textureToggle').addEventListener('click', toggleTexture);
+            document.addEventListener('click', onClick);
+            window.addEventListener('resize', onResize);
+            document.getElementById('subdivisions').addEventListener('change', updateSubdivisions);
         }
 
-        function toggleTexture() {
-            useTexture = !useTexture;
-            const textureLoader = new THREE.TextureLoader();
-            const texturePromise = new Promise((resolve) => {
-                textureLoader.load('mars4k.jpg', resolve);
+        function createSphere(subdivisions) {
+            if (sphere) {
+                scene.remove(sphere);
+                sphere.geometry.dispose();
+                sphere.material.dispose();
+            }
+
+            const geometry = new THREE.IcosahedronGeometry(5, subdivisions);
+            const material = new THREE.MeshPhongMaterial({
+                vertexColors: true,
+                wireframe: false,
+                transparent: true,
+                opacity: 0.9
             });
 
-            sphere.material.forEach((mat, index) => {
-                if (useTexture) {
-                    texturePromise.then(texture => {
-                        mat.map = texture;
-                        mat.color.set(0xFFFFFF);
-                        mat.needsUpdate = true;
-                    });
-                } else {
-                    mat.map = null;
-                    mat.color.setHSL(Math.random(), 0.5, 0.5);
-                    mat.needsUpdate = true;
-                }
-            });
+            // Generate vertex colors
+            const colors = [];
+            const count = geometry.attributes.position.count;
+
+            for (let i = 0; i < count; i++) {
+                colors.push(
+                    Math.random() * 0.5 + 0.5, // R
+                    Math.random() * 0.5 + 0.5, // G
+                    Math.random() * 0.5 + 0.5  // B
+                );
+            }
+
+            // Fixed line with proper parentheses
+            geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+            geometry.computeVertexNormals();
+
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
         }
 
-        // Rest of the code remains the same as previous version
-        // ... (include all other functions from previous code here)
+        // Rest of the functions (updateSubdivisions, event handlers, etc.)
+        function updateSubdivisions(e) {
+            createSphere(parseInt(e.target.value));
+        }
 
-        function onMouseMove(event) {
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        function onMouseDown(e) {
+            isDragging = true;
+            previousPosition = { x: e.clientX, y: e.clientY };
+        }
+
+        function onMouseMove(e) {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObject(sphere);
 
             if (intersects.length > 0) {
-                const faceIndex = intersects[0].faceIndex;
-                if (currentIntersect !== faceIndex) {
-                    if (currentIntersect !== null) {
-                        sphere.material[currentIntersect].opacity = 0.8;
-                    }
-                    currentIntersect = faceIndex;
-                    sphere.material[faceIndex].opacity = 1;
+                const newFaceIndex = intersects[0].faceIndex;
+                if (currentFaceIndex !== newFaceIndex) {
+                    currentFaceIndex = newFaceIndex;
                 }
-            } else if (currentIntersect !== null) {
-                sphere.material[currentIntersect].opacity = 0.8;
-                currentIntersect = null;
+            } else {
+                currentFaceIndex = null;
             }
 
             if (isDragging) {
-                const deltaMove = {
-                    x: event.clientX - previousMousePosition.x,
-                    y: event.clientY - previousMousePosition.y
+                const delta = {
+                    x: e.clientX - previousPosition.x,
+                    y: e.clientY - previousPosition.y
                 };
-
-                sphere.rotation.y += deltaMove.x * 0.01;
-                sphere.rotation.x += deltaMove.y * 0.01;
-
-                previousMousePosition = {
-                    x: event.clientX,
-                    y: event.clientY
-                };
+                sphere.rotation.y += delta.x * 0.01;
+                sphere.rotation.x += delta.y * 0.01;
+                previousPosition = { x: e.clientX, y: e.clientY };
             }
+        }
+
+        function onMouseUp() {
+            isDragging = false;
+        }
+
+        function onClick(e) {
+            if (currentFaceIndex !== null) {
+                const popup = document.getElementById('popup');
+                popup.style.display = 'block';
+                popup.style.left = `${e.clientX + 15}px`;
+                popup.style.top = `${e.clientY + 15}px`;
+                popup.textContent = `Cell Number: ${currentFaceIndex}`;
+                setTimeout(() => popup.style.display = 'none', 2000);
+            }
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function animate() {
