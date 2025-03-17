@@ -1,20 +1,26 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Spherical Grid Solution</title>
+    <title>Mars Spherical Grid</title>
     <style>
         body { margin: 0; overflow: hidden; }
         #controls { position: absolute; top: 10px; left: 10px; z-index: 100; color: white; }
-        #popup { position: absolute; background: white; padding: 8px; border: 1px solid #ccc; display: none; }
+        #popup {
+            position: absolute;
+            background: rgba(255,255,255,0.9);
+            padding: 8px;
+            border-radius: 4px;
+            display: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
 <div id="controls">
     <select id="subdivisions">
-        <option value="0">20 Faces</option>
-        <option value="1">80 Faces</option>
-        <option value="2">320 Faces</option>
-        <option value="3">1280 Faces</option>
+        <option value="32">Low</option>
+        <option value="64" selected>Medium</option>
+        <option value="128">High</option>
     </select>
 </div>
 <div id="popup"></div>
@@ -26,12 +32,8 @@
         let isDragging = false;
         let previousPosition = { x: 0, y: 0 };
         let currentFaceIndex = null;
-
-        // Check WebGL support first
-        if (!window.WebGLRenderingContext) {
-            alert('WebGL is not supported in your browser!');
-            throw new Error('WebGL not supported');
-        }
+        let lastClickedIndex = null;
+        const textureLoader = new THREE.TextureLoader();
 
         init();
         animate();
@@ -40,25 +42,16 @@
             // Scene setup
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-
-            try {
-                renderer = new THREE.WebGLRenderer({ antialias: true });
-            } catch (e) {
-                alert('Failed to create WebGL context: ' + e.message);
-                return;
-            }
-
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x333333);
             document.body.appendChild(renderer.domElement);
 
-            // Create initial sphere
-            createSphere(1);
+            createSphere(64);
             camera.position.z = 15;
 
             // Lighting
-            const light = new THREE.DirectionalLight(0xffffff, 1);
-            light.position.set(1, 1, 1).normalize();
+            const light = new THREE.DirectionalLight(0xffffff, 0.5);
+            light.position.set(5, 3, 5);
             scene.add(light);
             scene.add(new THREE.AmbientLight(0x404040));
 
@@ -78,35 +71,26 @@
                 sphere.material.dispose();
             }
 
-            const geometry = new THREE.IcosahedronGeometry(5, subdivisions);
-            const material = new THREE.MeshPhongMaterial({
-                vertexColors: true,
-                wireframe: false,
-                transparent: true,
-                opacity: 0.9
+            // Load Mars texture
+            textureLoader.load('mars4k.jpg', (texture) => {
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+
+                const geometry = new THREE.SphereGeometry(5, subdivisions, subdivisions);
+                const material = new THREE.MeshPhongMaterial({
+                    map: texture,
+                    bumpScale: 0.05,
+                    specular: 0x111111,
+                    shininess: 5
+                });
+
+                sphere = new THREE.Mesh(geometry, material);
+                scene.add(sphere);
+            }, undefined, (err) => {
+                console.error('Error loading texture:', err);
             });
-
-            // Generate vertex colors
-            const colors = [];
-            const count = geometry.attributes.position.count;
-
-            for (let i = 0; i < count; i++) {
-                colors.push(
-                    Math.random() * 0.5 + 0.5, // R
-                    Math.random() * 0.5 + 0.5, // G
-                    Math.random() * 0.5 + 0.5  // B
-                );
-            }
-
-            // Fixed line with proper parentheses
-            geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-            geometry.computeVertexNormals();
-
-            sphere = new THREE.Mesh(geometry, material);
-            scene.add(sphere);
         }
 
-        // Rest of the functions (updateSubdivisions, event handlers, etc.)
         function updateSubdivisions(e) {
             createSphere(parseInt(e.target.value));
         }
@@ -124,10 +108,7 @@
             const intersects = raycaster.intersectObject(sphere);
 
             if (intersects.length > 0) {
-                const newFaceIndex = intersects[0].faceIndex;
-                if (currentFaceIndex !== newFaceIndex) {
-                    currentFaceIndex = newFaceIndex;
-                }
+                currentFaceIndex = intersects[0].faceIndex;
             } else {
                 currentFaceIndex = null;
             }
@@ -148,13 +129,22 @@
         }
 
         function onClick(e) {
+            const popup = document.getElementById('popup');
+
             if (currentFaceIndex !== null) {
-                const popup = document.getElementById('popup');
-                popup.style.display = 'block';
-                popup.style.left = `${e.clientX + 15}px`;
-                popup.style.top = `${e.clientY + 15}px`;
-                popup.textContent = `Cell Number: ${currentFaceIndex}`;
-                setTimeout(() => popup.style.display = 'none', 2000);
+                if (currentFaceIndex === lastClickedIndex) {
+                    popup.style.display = 'none';
+                    lastClickedIndex = null;
+                } else {
+                    popup.style.display = 'block';
+                    popup.style.left = `${e.clientX + 15}px`;
+                    popup.style.top = `${e.clientY + 15}px`;
+                    popup.textContent = `Sector: ${currentFaceIndex}`;
+                    lastClickedIndex = currentFaceIndex;
+                }
+            } else {
+                popup.style.display = 'none';
+                lastClickedIndex = null;
             }
         }
 
