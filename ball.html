@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Textured Sphere</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+  <!-- Load Three.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Load OrbitControls for mouse interaction -->
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+<script>
+    // Create scene, camera, and renderer
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Create sphere geometry
+    const geometry = new THREE.SphereGeometry(5, 32, 32);
+
+    // Load texture and apply it to material
+    const textureLoader = new THREE.TextureLoader();
+    const texture = textureLoader.load('MARS.jpg'); // Replace with your texture path
+    const material = new THREE.MeshBasicMaterial({ map: texture });
+
+    // Create mesh (sphere + texture) and add to scene
+    const sphere = new THREE.Mesh(geometry, material);
+    scene.add(sphere);
+
+    // Position camera to view the sphere
+    camera.position.z = 10;
+
+    // Add OrbitControls for mouse interaction
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; // Smooth rotation
+    controls.dampingFactor = 0.05;
+
+    // Handle window resizing
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Animation loop to render and update the scene
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update(); // Update rotation based on mouse input
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
