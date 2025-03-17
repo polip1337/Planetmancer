@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Mars Spherical Grid</title>
+    <title>Quad-Only Spherical Grid</title>
     <style>
         body { margin: 0; overflow: hidden; }
         #controls { position: absolute; top: 10px; left: 10px; z-index: 100; color: white; }
@@ -18,9 +18,9 @@
 <body>
 <div id="controls">
     <select id="subdivisions">
-        <option value="32">Low</option>
-        <option value="64" selected>Medium</option>
-        <option value="128">High</option>
+        <option value="8">Low (256 quads)</option>
+        <option value="16" selected>Medium (1024 quads)</option>
+        <option value="32">High (4096 quads)</option>
     </select>
 </div>
 <div id="popup"></div>
@@ -31,28 +31,27 @@
         let mouse = new THREE.Vector2();
         let isDragging = false;
         let previousPosition = { x: 0, y: 0 };
-        let currentFaceIndex = null;
+        let currentQuadIndex = null;
         let lastClickedIndex = null;
-        let initialFaceIndex = null;
+        let initialQuadIndex = null;
         const textureLoader = new THREE.TextureLoader();
-        const CLICK_THRESHOLD = 5; // pixels
+        const CLICK_THRESHOLD = 5;
 
         init();
         animate();
 
         function init() {
-            // Scene setup
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            createSphere(64);
+            createSphere(16);
             camera.position.z = 15;
 
             // Lighting
-            const light = new THREE.DirectionalLight(0xffffff, 0.5);
+            const light = new THREE.DirectionalLight(0xffffff, 0.8);
             light.position.set(5, 3, 5);
             scene.add(light);
             scene.add(new THREE.AmbientLight(0x404040));
@@ -66,6 +65,84 @@
             document.getElementById('subdivisions').addEventListener('change', updateSubdivisions);
         }
 
+        function createQuadSphere(radius, subdivisions) {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            const uvs = [];
+            const quadIndices = [];
+            const edges = [];
+            let quadIndex = 0;
+
+            // Create latitude/longitude grid with vertical quads
+            const verticalSegments = subdivisions;
+            const horizontalSegments = subdivisions * 2;
+
+            for (let lat = 0; lat < verticalSegments; lat++) {
+                const theta1 = (lat / verticalSegments) * Math.PI;
+                const theta2 = ((lat + 1) / verticalSegments) * Math.PI;
+
+                for (let lon = 0; lon < horizontalSegments; lon++) {
+                    const phi1 = (lon / horizontalSegments) * Math.PI * 2;
+                    const phi2 = ((lon + 1) / horizontalSegments) * Math.PI * 2;
+
+                    // Create quad vertices
+                    const v0 = sphericalToCartesian(radius, theta1, phi1);
+                    const v1 = sphericalToCartesian(radius, theta1, phi2);
+                    const v2 = sphericalToCartesian(radius, theta2, phi2);
+                    const v3 = sphericalToCartesian(radius, theta2, phi1);
+
+                    // Add vertices
+                    const index = vertices.length / 3;
+                    vertices.push(...v0, ...v1, ...v2, ...v3);
+
+                    // UV coordinates
+                    uvs.push(
+                        lon / horizontalSegments, 1 - lat / verticalSegments,
+                        (lon + 1) / horizontalSegments, 1 - lat / verticalSegments,
+                        (lon + 1) / horizontalSegments, 1 - (lat + 1) / verticalSegments,
+                        lon / horizontalSegments, 1 - (lat + 1) / verticalSegments
+                    );
+
+                    // Quad indices (using triangle strip)
+                    quadIndices.push(
+                        index, index + 1, index + 2,
+                        index, index + 2, index + 3
+                    );
+
+                    // Store quad index for both triangles
+                    for (let i = 0; i < 6; i++) {
+                        edges.push(quadIndex);
+                    }
+
+                    // Wireframe edges (excluding diagonals)
+                    edges.push(
+                        index, index + 1,
+                        index + 1, index + 2,
+                        index + 2, index + 3,
+                        index + 3, index
+                    );
+
+                    quadIndex++;
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+            geometry.setAttribute('quadIndex', new THREE.BufferAttribute(new Uint32Array(edges), 1));
+            geometry.setIndex(quadIndices);
+            geometry.computeVertexNormals();
+
+            return geometry;
+        }
+
+        function sphericalToCartesian(radius, theta, phi) {
+            return [
+                radius * Math.sin(theta) * Math.cos(phi),
+                radius * Math.cos(theta),
+                radius * Math.sin(theta) * Math.sin(phi)
+            ];
+        }
+
         function createSphere(subdivisions) {
             if (sphere) {
                 scene.remove(sphere);
@@ -77,31 +154,27 @@
             }
 
             textureLoader.load('mars4k.jpg', (texture) => {
-                texture.wrapS = THREE.RepeatWrapping;
-                texture.wrapT = THREE.RepeatWrapping;
+                const geometry = createQuadSphere(5, subdivisions);
 
-                // Main sphere with texture
-                const geometry = new THREE.SphereGeometry(5, subdivisions, subdivisions);
-
-                // Create main sphere
+                // Main material
                 sphere = new THREE.Mesh(
                     geometry,
                     new THREE.MeshPhongMaterial({
                         map: texture,
-                        bumpScale: 0.05,
                         specular: 0x111111,
                         shininess: 5
                     })
                 );
 
-                // Create wireframe grid
-                wireframe = new THREE.Mesh(
-                    geometry,
-                    new THREE.MeshBasicMaterial({
+                // Quad wireframe (true edges only)
+                const edgeGeometry = new THREE.WireframeGeometry(geometry);
+                wireframe = new THREE.LineSegments(
+                    edgeGeometry,
+                    new THREE.LineBasicMaterial({
                         color: 0xffffff,
-                        wireframe: true,
                         transparent: true,
-                        opacity: 0.3
+                        opacity: 0.3,
+                        linewidth: 2
                     })
                 );
 
@@ -119,10 +192,9 @@
         function onMouseDown(e) {
             isDragging = true;
             previousPosition = { x: e.clientX, y: e.clientY };
-
-            // Store initial face index
             const intersects = getIntersects(e);
-            initialFaceIndex = intersects.length > 0 ? intersects[0].faceIndex : null;
+            initialQuadIndex = intersects.length > 0 ?
+                sphere.geometry.attributes.quadIndex.array[intersects[0].face.a] : null;
         }
 
         function onMouseMove(e) {
@@ -130,7 +202,8 @@
             mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
             const intersects = getIntersects(e);
-            currentFaceIndex = intersects.length > 0 ? intersects[0].faceIndex : null;
+            currentQuadIndex = intersects.length > 0 ?
+                sphere.geometry.attributes.quadIndex.array[intersects[0].face.a] : null;
 
             if (isDragging) {
                 const delta = {
@@ -144,31 +217,23 @@
             }
         }
 
-        function onMouseUp(e) {
-            isDragging = false;
-        }
-
         function onClick(e) {
             const popup = document.getElementById('popup');
-            const finalFaceIndex = currentFaceIndex;
             const movement = Math.sqrt(
                 Math.pow(e.clientX - previousPosition.x, 2) +
                 Math.pow(e.clientY - previousPosition.y, 2)
             );
 
-            // Only register click if:
-            // 1. Mouse didn't move too much
-            // 2. Initial and final face indices match
-            if (movement < CLICK_THRESHOLD && initialFaceIndex === finalFaceIndex && finalFaceIndex !== null) {
-                if (finalFaceIndex === lastClickedIndex) {
+            if (movement < CLICK_THRESHOLD && initialQuadIndex === currentQuadIndex && currentQuadIndex !== null) {
+                if (currentQuadIndex === lastClickedIndex) {
                     popup.style.display = 'none';
                     lastClickedIndex = null;
                 } else {
                     popup.style.display = 'block';
                     popup.style.left = `${e.clientX + 15}px`;
                     popup.style.top = `${e.clientY + 15}px`;
-                    popup.textContent = `Sector: ${finalFaceIndex}`;
-                    lastClickedIndex = finalFaceIndex;
+                    popup.textContent = `Quad: ${currentQuadIndex}`;
+                    lastClickedIndex = currentQuadIndex;
                 }
             } else {
                 popup.style.display = 'none';
@@ -192,6 +257,9 @@
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
+        }
+        function onMouseUp(e) {
+            isDragging = false;
         }
     </script>
 </body>
